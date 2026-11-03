@@ -7,7 +7,10 @@ import { isMonthKey } from './months.js';
 
 export const SCHEMA_VERSION = 1;
 export const STORAGE_KEY = 'cashbackPicker.state';
+export const BACKUP_KEY = `${STORAGE_KEY}.backup`;
 export const APP_MARKER = 'cashback-picker';
+const EXPORT_REMINDER_DAYS = 30;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 export function createDefaultState() {
   return {
@@ -173,6 +176,59 @@ export function importDoc(json) {
   const { app, exportedAt, ...doc } = parsed.value ?? {};
   if (app !== APP_MARKER) return fail('Это не резервная копия «Какой картой?»');
   return upgrade(doc);
+}
+
+// Counts shown before an import replaces everything.
+export function summarizeDoc(state) {
+  const planned = state.plans.filter((plan) => plan.categories.length > 0);
+  return {
+    banks: state.banks.length,
+    stores: state.stores.length,
+    groups: state.mccGroups.length,
+    months: new Set(planned.map((plan) => plan.month)).size,
+    categories: planned.reduce((sum, plan) => sum + plan.categories.length, 0),
+    purchases: state.purchases.length,
+  };
+}
+
+const hasUserData = (state) => state.purchases.length > 0 || state.plans.some((p) => p.categories.length > 0);
+
+// True when there is something worth saving and no export for 30 days.
+export function exportReminderDue(state, now) {
+  if (!hasUserData(state)) return false;
+  const last = Date.parse(state.settings.lastExportAt ?? '');
+  return Number.isNaN(last) || now.getTime() - last > EXPORT_REMINDER_DAYS * DAY_MS;
+}
+
+export function saveBackup(storage, state) {
+  try {
+    storage.setItem(BACKUP_KEY, JSON.stringify(state));
+    return { ok: true };
+  } catch (error) {
+    return { ok: false, error: error?.name === 'QuotaExceededError' ? 'quota' : 'unavailable' };
+  }
+}
+
+// { ok, state } with the pre-import document, or { ok: false } when there is none.
+export function loadBackup(storage) {
+  let raw = null;
+  try {
+    raw = storage.getItem(BACKUP_KEY);
+  } catch (error) {
+    return fail(`Хранилище недоступно: ${error.message}`);
+  }
+  if (raw == null) return fail('Резервной копии нет');
+  const parsed = parseJson(raw);
+  return parsed.ok ? upgrade(parsed.value) : parsed;
+}
+
+export function clearBackup(storage) {
+  try {
+    storage.removeItem(BACKUP_KEY);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // --- Entity reducers ------------------------------------------------------
