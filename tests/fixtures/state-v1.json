@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "banks": [
+    {
+      "id": "sber", "name": "Сбер", "color": "#21a038", "order": 1, "enabled": true,
+      "basePercent": 0.5, "rewardType": "points", "pointsName": "Спасибо",
+      "valueCoef": 0.8, "monthlyLimit": null
+    },
+    {
+      "id": "tbank", "name": "Т-Банк", "color": "#ffdd2d", "order": 2, "enabled": false,
+      "basePercent": 1, "rewardType": "rub", "pointsName": "",
+      "valueCoef": 1, "monthlyLimit": 5000
+    }
+  ],
+  "mccGroups": [
+    { "id": "supermarkets", "name": "Супермаркеты", "codes": [5411, 5499] },
+    { "id": "airlines", "name": "Авиабилеты", "codes": [[3000, 3350], 4511] }
+  ],
+  "stores": [
+    {
+      "id": "pyaterochka", "name": "Пятёрочка", "aliases": ["5ка"], "mcc": 5411,
+      "note": "ориентировочно", "usedCount": 3, "lastUsedAt": "2026-11-02T09:15:00.000Z"
+    }
+  ],
+  "plans": [
+    {
+      "month": "2026-11", "bankId": "sber",
+      "categories": [
+        { "id": "c1", "name": "Супермаркеты", "percent": 5, "codes": [5411, 5499], "limit": 1000 }
+      ]
+    }
+  ],
+  "purchases": [
+    {
+      "id": "p1", "date": "2026-11-02", "bankId": "sber", "categoryId": "c1",
+      "mcc": 5411, "amount": 1200, "reward": 60
+    }
+  ],
+  "settings": { "lastExportAt": "2026-11-01T08:00:00.000Z" }
+}
