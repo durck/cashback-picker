@@ -4,16 +4,11 @@ import { createStore } from './ui/store.js';
 import { parseRoute } from './ui/router.js';
 import * as pick from './ui/pick.js';
 import * as categories from './ui/categories.js';
+import * as stores from './ui/stores.js';
+import * as banks from './ui/banks.js';
 import * as more from './ui/more.js';
-import { stubScreen } from './ui/stub.js';
 
-const SCREENS = {
-  pick,
-  categories,
-  stores: stubScreen('Магазины'),
-  banks: stubScreen('Банки'),
-  more,
-};
+const SCREENS = { pick, categories, stores, banks, more };
 const EVENT_TYPES = ['click', 'input', 'change', 'submit'];
 const TOAST_MS = 2600;
 const TOAST_ACTION_MS = 6000;

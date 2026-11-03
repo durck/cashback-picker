@@ -9,6 +9,7 @@ import { touchStore, setSetting } from '../core/state.js';
 import {
   html, fmtMoney, fmtPct, fmtReward, fmtMonthRu, parseAmount, bankColor,
 } from './format.js';
+import { storeDialog, openStoreDialog, storeEditorActions } from './store-editor.js';
 
 // Transient input state survives re-renders but is not persisted.
 const view = { query: '', amountText: '', chosenKey: null };
@@ -35,6 +36,7 @@ export function render(ctx) {
           enterkeyhint="done" data-input="amount">
       </div>
       <div id="pick-results" class="pick-results">${results(ctx)}</div>
+      ${storeDialog()}
     </section>`;
 }
 
@@ -52,7 +54,11 @@ function results(ctx) {
   }
   const { candidates, target } = resolveTarget(ctx.state);
   if (!target) {
-    return html`${banner}<p class="hint">Ничего не нашлось по запросу «${view.query.trim()}». Попробуйте MCC-код из выписки.</p>`;
+    return html`${banner}
+      <p class="hint">Ничего не нашлось по запросу «${view.query.trim()}». Введите MCC-код из выписки или добавьте магазин.</p>
+      <button type="button" class="btn btn-primary btn-wide" data-click="addStoreFromSearch">
+        Добавить магазин «${view.query.trim()}»
+      </button>`;
   }
   const amount = parseAmount(view.amountText);
   const ranked = rankBanks(ctx.state, { codes: target.codes, amount, month: monthKey(ctx.now()) });
@@ -237,4 +243,13 @@ export const actions = {
   dismissBanner(ctx) {
     ctx.store.set((state) => setSetting(state, BANNER_SETTING, monthKey(ctx.now())));
   },
+  addStoreFromSearch(ctx) {
+    openStoreDialog(ctx, null, { name: view.query.trim() });
+  },
+  ...storeEditorActions({
+    onSave(store) {
+      view.query = store.name;
+      view.chosenKey = `store:${store.id}`;
+    },
+  }),
 };

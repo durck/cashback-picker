@@ -1,12 +1,16 @@
-// «Ещё»: purchase log for a month with deletion (export/import and MCC groups come later).
+// «Ещё»: purchase log for a month and the MCC group reference (export/import come later).
+import { formatCodes, parseCodes } from '../core/match.js';
 import { monthKey, isMonthKey, prevMonth, nextMonth, categoriesFor } from '../core/months.js';
 import { monthLog, addPurchase, removePurchase } from '../core/limits.js';
+import { upsertGroup, removeGroup } from '../core/state.js';
 import {
   html, fmtMoney, fmtReward, fmtMonthRu, fmtDay, bankColor,
 } from './format.js';
 import { href } from './router.js';
 
 const RUB = { rewardType: 'rub' };
+const GROUP_DIALOG_ID = 'group-dialog';
+const CODES_PREVIEW = 8;
 
 function currentMonth(ctx) {
   const [month] = ctx.route.params;
@@ -31,7 +35,82 @@ export function render(ctx) {
         ${entries.length ? html`<p class="muted small">Записей: ${entries.length}</p>` : ''}
         ${list}
       </article>
+      ${groupsCard(ctx.state)}
+      ${groupDialog()}
     </section>`;
+}
+
+function codesPreview(codes) {
+  const shown = formatCodes(codes.slice(0, CODES_PREVIEW));
+  return codes.length > CODES_PREVIEW ? `${shown} …` : shown;
+}
+
+function groupsCard(state) {
+  const rows = state.mccGroups.map((group) => html`
+    <li>
+      <button type="button" class="list-row" data-click="editGroup" data-id="${group.id}">
+        <span class="list-main">
+          <span class="cat-name">${group.name}</span>
+          <span class="muted small">${codesPreview(group.codes)}</span>
+        </span>
+        <span class="muted" aria-hidden="true">›</span>
+      </button>
+    </li>`);
+  return html`
+    <details class="card">
+      <summary class="card-title">Справочник MCC-групп (${state.mccGroups.length})</summary>
+      <p class="muted small">Группы — заготовки для категорий. Правка группы не меняет уже созданные категории.</p>
+      <ul class="plain-list">${rows}</ul>
+      <button type="button" class="btn btn-ghost" data-click="addGroup">+ Группа</button>
+    </details>`;
+}
+
+function groupDialog() {
+  return html`
+    <dialog id="${GROUP_DIALOG_ID}" class="sheet" aria-labelledby="group-dialog-title">
+      <form data-submit="saveGroup" novalidate>
+        <h2 id="group-dialog-title" class="sheet-title">MCC-группа</h2>
+        <input type="hidden" name="groupId">
+        <label class="field">Название <input class="input" name="name" maxlength="40" autocomplete="off"></label>
+        <label class="field">MCC-коды, диапазоны через дефис
+          <textarea class="input" name="codes" rows="3" autocomplete="off" placeholder="5411, 5499, 3000-3299"></textarea>
+        </label>
+        <p class="form-error" role="alert"></p>
+        <div class="sheet-actions">
+          <button type="button" class="btn btn-danger" data-click="deleteGroup">Удалить</button>
+          <button type="button" class="btn" data-click="closeGroupDialog">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+    </dialog>`;
+}
+
+function openGroupDialog(group) {
+  const dialog = document.getElementById(GROUP_DIALOG_ID);
+  const form = dialog.querySelector('form');
+  form.reset();
+  form.elements.groupId.value = group?.id ?? '';
+  form.elements.name.value = group?.name ?? '';
+  form.elements.codes.value = group ? formatCodes(group.codes) : '';
+  form.querySelector('.sheet-title').textContent = group ? 'MCC-группа' : 'Новая MCC-группа';
+  form.querySelector('[data-click="deleteGroup"]').hidden = !group;
+  form.querySelector('.form-error').textContent = '';
+  dialog.showModal();
+}
+
+// Returns { group } or { error } from the dialog values.
+function readGroup(ctx, form) {
+  const data = new FormData(form);
+  const name = String(data.get('name')).trim();
+  const { codes, errors } = parseCodes(data.get('codes'));
+  if (!name) return { error: 'Укажите название группы.' };
+  if (errors.length) return { error: `Не понял коды: ${errors.join(', ')}` };
+  if (codes.length === 0) return { error: 'Нужен хотя бы один MCC-код.' };
+  return { group: { id: String(data.get('groupId')) || ctx.newId(), name, codes } };
+}
+
+function closeGroupDialog() {
+  document.getElementById(GROUP_DIALOG_ID)?.close();
 }
 
 // Log entries may outlive their bank or category: show them as deleted.
@@ -66,4 +145,32 @@ export const actions = {
       onAction: () => ctx.store.set((state) => addPurchase(state, entry)),
     });
   },
+  addGroup() {
+    openGroupDialog(null);
+  },
+  editGroup(ctx, el) {
+    const group = ctx.state.mccGroups.find((g) => g.id === el.dataset.id);
+    if (group) openGroupDialog(group);
+  },
+  saveGroup(ctx, form) {
+    const result = readGroup(ctx, form);
+    if (result.error) {
+      form.querySelector('.form-error').textContent = result.error;
+      return;
+    }
+    closeGroupDialog();
+    ctx.store.set((state) => upsertGroup(state, result.group));
+    ctx.toast(`Сохранено: ${result.group.name}`);
+  },
+  deleteGroup(ctx, el) {
+    const group = ctx.state.mccGroups.find((g) => g.id === el.form.elements.groupId.value);
+    if (!group) return;
+    closeGroupDialog();
+    ctx.store.set((state) => removeGroup(state, group.id));
+    ctx.toast(`Удалено: ${group.name}`, {
+      actionLabel: 'Вернуть',
+      onAction: () => ctx.store.set((state) => upsertGroup(state, group)),
+    });
+  },
+  closeGroupDialog,
 };

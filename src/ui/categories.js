@@ -2,7 +2,7 @@
 import { formatCodes, parseCodes } from '../core/match.js';
 import {
   monthKey, isMonthKey, prevMonth, nextMonth, categoriesFor, latestPlannedMonthBefore,
-  copyPlans, upsertCategory, removeCategory,
+  copyPlans, upsertCategory, removeCategory, overlappingCategories,
 } from '../core/months.js';
 import { remaining } from '../core/limits.js';
 import {
@@ -141,22 +141,44 @@ function openDialog(ctx, bankId, category) {
   dialogEl.showModal();
 }
 
+function categoryFields(state, data) {
+  const group = state.mccGroups.find((g) => g.id === data.get('groupId'));
+  const limitText = String(data.get('limit')).trim();
+  const { codes, errors } = parseCodes(data.get('codes'));
+  return {
+    codes,
+    codeErrors: errors,
+    limitText,
+    name: String(data.get('name')).trim() || group?.name || '',
+    percent: parseDecimal(data.get('percent')),
+    limit: limitText ? parseDecimal(limitText) : null,
+  };
+}
+
+function categoryFieldsError(fields) {
+  if (!fields.name) return 'Укажите название или выберите группу.';
+  if (fields.percent === null || fields.percent <= 0 || fields.percent > 100) return 'Процент — число от 0 до 100.';
+  if (fields.codeErrors.length) return `Не понял коды: ${fields.codeErrors.join(', ')}`;
+  if (fields.codes.length === 0) return 'Выберите группу или введите MCC-коды.';
+  if (fields.limitText && fields.limit === null) return 'Лимит — неотрицательное число.';
+  return null;
+}
+
 // Returns { category } or { error } from the dialog form values.
 function readCategory(ctx, form) {
   const data = new FormData(form);
-  const group = ctx.state.mccGroups.find((g) => g.id === data.get('groupId'));
-  const name = String(data.get('name')).trim() || group?.name || '';
-  const percent = parseDecimal(data.get('percent'));
-  const { codes, errors } = parseCodes(data.get('codes'));
-  const limitText = String(data.get('limit')).trim();
-  const limit = limitText ? parseDecimal(limitText) : null;
-  if (!name) return { error: 'Укажите название или выберите группу.' };
-  if (percent === null || percent <= 0 || percent > 100) return { error: 'Процент — число от 0 до 100.' };
-  if (errors.length) return { error: `Не понял коды: ${errors.join(', ')}` };
-  if (codes.length === 0) return { error: 'Выберите группу или введите MCC-коды.' };
-  if (limitText && limit === null) return { error: 'Лимит — неотрицательное число.' };
-  const id = String(data.get('categoryId')) || ctx.newId();
-  return { category: { id, name, percent, codes, limit } };
+  const fields = categoryFields(ctx.state, data);
+  const error = categoryFieldsError(fields);
+  if (error) return { error };
+  const { name, percent, codes, limit } = fields;
+  return { category: { id: String(data.get('categoryId')) || ctx.newId(), name, percent, codes, limit } };
+}
+
+function savedMessage(state, { month, bankId, category }) {
+  const overlaps = overlappingCategories(state, { month, bankId, codes: category.codes, exceptId: category.id });
+  if (overlaps.length === 0) return 'Категория сохранена';
+  const names = overlaps.map((c) => `«${c.name}»`).join(', ');
+  return `Сохранено. Коды пересекаются с ${names} — будет выбран больший процент`;
 }
 
 function closeDialog() {
@@ -188,10 +210,11 @@ export const actions = {
       form.querySelector('.form-error').textContent = result.error;
       return;
     }
-    const bankId = form.elements.bankId.value;
+    const target = { month: currentMonth(ctx), bankId: form.elements.bankId.value, category: result.category };
+    const message = savedMessage(ctx.state, target); // reads the state before this save
     closeDialog();
-    ctx.store.set((state) => upsertCategory(state, { month: currentMonth(ctx), bankId, category: result.category }));
-    ctx.toast('Категория сохранена');
+    ctx.store.set((state) => upsertCategory(state, target));
+    ctx.toast(message);
   },
   deleteCategory(ctx, el) {
     const form = el.form;
