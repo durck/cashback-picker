@@ -48,6 +48,29 @@ export function limitsOverview(state, month) {
     }));
 }
 
+// Newest first; purchases on the same day keep reverse insertion order.
+export function monthLog(state, month) {
+  return purchasesFor(state, month)
+    .map((purchase, index) => ({ purchase, index }))
+    .sort((a, b) => b.purchase.date.localeCompare(a.purchase.date) || b.index - a.index)
+    .map(({ purchase }) => purchase);
+}
+
+// Builds a log entry from a rankBanks row computed with an amount.
+export function purchaseFromRanked(row, { id, date, codes, amount, label = '' }) {
+  const [first] = codes;
+  return {
+    id,
+    date,
+    bankId: row.bank.id,
+    categoryId: row.category?.id ?? null,
+    mcc: typeof first === 'number' ? first : null,
+    amount,
+    reward: row.reward,
+    label,
+  };
+}
+
 export function addPurchase(state, purchase) {
   return { ...state, purchases: [...state.purchases, purchase] };
 }
