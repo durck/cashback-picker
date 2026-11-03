@@ -4,6 +4,7 @@ import { createStore } from './ui/store.js';
 import { parseRoute } from './ui/router.js';
 import * as pick from './ui/pick.js';
 import * as categories from './ui/categories.js';
+import * as more from './ui/more.js';
 import { stubScreen } from './ui/stub.js';
 
 const SCREENS = {
@@ -11,10 +12,11 @@ const SCREENS = {
   categories,
   stores: stubScreen('Магазины'),
   banks: stubScreen('Банки'),
-  more: stubScreen('Ещё'),
+  more,
 };
 const EVENT_TYPES = ['click', 'input', 'change', 'submit'];
 const TOAST_MS = 2600;
+const TOAST_ACTION_MS = 6000;
 const LOAD_MESSAGES = {
   recovered: 'Сохранённые данные повреждены: копия отложена, начинаем с заготовок',
   unavailable: 'Хранилище браузера недоступно — изменения не сохранятся',
@@ -46,14 +48,33 @@ const newId = () => (globalThis.crypto?.randomUUID
 
 const root = document.getElementById('app');
 const toastEl = document.getElementById('toast');
+const toastText = toastEl.querySelector('[data-toast-text]');
+const toastButton = toastEl.querySelector('[data-toast-action]');
 let toastTimer = null;
+let toastAction = null;
 
-function toast(message) {
-  toastEl.textContent = message;
+function hideToast() {
+  toastEl.hidden = true;
+  toastAction = null;
+}
+
+// toast('Готово') or toast('Удалено', { actionLabel: 'Вернуть', onAction })
+function toast(message, { actionLabel = '', onAction = null } = {}) {
+  toastText.textContent = message;
+  toastButton.textContent = actionLabel;
+  toastButton.hidden = !actionLabel;
+  toastAction = onAction;
   toastEl.hidden = false;
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => { toastEl.hidden = true; }, TOAST_MS);
+  toastTimer = setTimeout(hideToast, actionLabel ? TOAST_ACTION_MS : TOAST_MS);
 }
+
+toastButton.addEventListener('click', () => {
+  const action = toastAction;
+  clearTimeout(toastTimer);
+  hideToast();
+  action?.();
+});
 
 const storage = browserStorage();
 const loaded = load(storage);

@@ -45,6 +45,14 @@ export function fmtReward(value, bank) {
   return `${NUMBER.format(value)} ${bank.pointsName || 'баллов'}`;
 }
 
+const DAY = new Intl.DateTimeFormat('ru-RU', { day: 'numeric', month: 'short' });
+
+// '2026-11-03' → '3 нояб.'
+export function fmtDay(dateKey) {
+  const [year, month, day] = dateKey.split('-').map(Number);
+  return DAY.format(new Date(year, month - 1, day));
+}
+
 export function fmtMonthRu(month) {
   const [year, monthNumber] = month.split('-').map(Number);
   return `${MONTHS[monthNumber - 1]} ${year}`;
