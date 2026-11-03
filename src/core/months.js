@@ -1,5 +1,7 @@
 // Month keys ('YYYY-MM') come from local date parts only, never toISOString,
 // so a purchase at 23:59 local time stays in its own month.
+import { codesOverlap } from './match.js';
+
 const pad = (value, width = 2) => String(value).padStart(width, '0');
 
 export function monthKey(date) {
@@ -71,6 +73,12 @@ export function upsertCategory(state, { month, bankId, category }) {
     ? current.map((c) => (c.id === category.id ? category : c))
     : [...current, category];
   return { ...state, plans: withPlan(state.plans, { month, bankId, categories }) };
+}
+
+// Other categories of the same bank and month that share at least one code.
+export function overlappingCategories(state, { month, bankId, codes, exceptId = null }) {
+  return categoriesFor(state, month, bankId)
+    .filter((category) => category.id !== exceptId && codesOverlap(category.codes, codes));
 }
 
 export function removeCategory(state, { month, bankId, categoryId }) {

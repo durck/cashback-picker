@@ -177,6 +177,31 @@ export function importDoc(json) {
 
 // --- Entity reducers ------------------------------------------------------
 
+function upsertById(items, item) {
+  return items.some((existing) => existing.id === item.id)
+    ? items.map((existing) => (existing.id === item.id ? item : existing))
+    : [...items, item];
+}
+
+export const upsertStore = (state, store) => ({ ...state, stores: upsertById(state.stores, store) });
+export const removeStore = (state, storeId) => ({ ...state, stores: state.stores.filter((s) => s.id !== storeId) });
+export const upsertBank = (state, bank) => ({ ...state, banks: upsertById(state.banks, bank) });
+export const upsertGroup = (state, group) => ({ ...state, mccGroups: upsertById(state.mccGroups, group) });
+export const removeGroup = (state, groupId) => ({
+  ...state, mccGroups: state.mccGroups.filter((g) => g.id !== groupId),
+});
+
+// Moves a bank one step up (delta = -1) or down (+1) and renumbers order 1..n.
+export function moveBank(state, bankId, delta) {
+  const sorted = [...state.banks].sort((a, b) => a.order - b.order);
+  const from = sorted.findIndex((bank) => bank.id === bankId);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= sorted.length) return state;
+  [sorted[from], sorted[to]] = [sorted[to], sorted[from]];
+  const orderById = new Map(sorted.map((bank, index) => [bank.id, index + 1]));
+  return { ...state, banks: state.banks.map((bank) => ({ ...bank, order: orderById.get(bank.id) })) };
+}
+
 export function touchStore(state, storeId, nowIso) {
   return {
     ...state,
