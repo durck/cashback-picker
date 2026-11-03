@@ -1,0 +1,14 @@
+{
+  "name": "cashback-picker",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Какой картой? — PWA для выбора карты с максимальным кешбэком",
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "serve": "node tools/serve.mjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
