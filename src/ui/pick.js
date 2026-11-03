@@ -16,6 +16,9 @@ const view = { query: '', amountText: '', chosenKey: null };
 const CANDIDATE_LIMIT = 6;
 const FREQUENT_LIMIT = 8;
 const BANNER_SETTING = 'copyBannerDismissed';
+const INSTALL_HINT_SETTING = 'installHintDismissed';
+
+const isInstalled = () => window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
 
 const candidateKey = (c) => (c.kind === 'store' ? `store:${c.store.id}`
   : c.kind === 'group' ? `group:${c.group.id}` : `mcc:${c.codes[0]}`);
@@ -49,7 +52,7 @@ function resolveTarget(state) {
 function results(ctx) {
   const banner = copyBanner(ctx);
   if (!view.query.trim()) {
-    return html`${banner}${frequentChips(ctx.state)}
+    return html`${banner}${installHint(ctx.state)}${frequentChips(ctx.state)}
       <p class="hint">Введите название магазина, 4-значный MCC-код или категорию, например «АЗС».</p>`;
   }
   const { candidates, target } = resolveTarget(ctx.state);
@@ -81,6 +84,20 @@ function copyBanner(ctx) {
       <div class="banner-actions">
         <button type="button" class="btn btn-primary" data-click="copyPrevious" data-from="${source}">Скопировать</button>
         <button type="button" class="btn" data-click="dismissBanner">Не сейчас</button>
+      </div>
+    </div>`;
+}
+
+// iOS keeps Safari-tab data and installed-app data apart, so install first.
+function installHint(state) {
+  if (isInstalled() || state.settings[INSTALL_HINT_SETTING]) return '';
+  return html`
+    <div class="banner banner-info" role="region" aria-label="Установка">
+      <p>Добавьте приложение на главный экран: в Safari — «Поделиться» → «На экран „Домой“», в Chrome — меню → «Установить приложение».
+        На iPhone данные в Safari и в установленном приложении хранятся раздельно: сначала установите, потом заполняйте
+        (или перенесите данные экспортом в «Ещё»).</p>
+      <div class="banner-actions">
+        <button type="button" class="btn" data-click="dismissInstallHint">Понятно</button>
       </div>
     </div>`;
 }
@@ -242,6 +259,9 @@ export const actions = {
   },
   dismissBanner(ctx) {
     ctx.store.set((state) => setSetting(state, BANNER_SETTING, monthKey(ctx.now())));
+  },
+  dismissInstallHint(ctx) {
+    ctx.store.set((state) => setSetting(state, INSTALL_HINT_SETTING, true));
   },
   addStoreFromSearch(ctx) {
     openStoreDialog(ctx, null, { name: view.query.trim() });

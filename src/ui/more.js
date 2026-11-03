@@ -1,5 +1,8 @@
-// «Ещё»: purchase log for a month and the MCC group reference (export/import come later).
+// «Ещё»: backup, purchase log for a month, MCC group reference, app version.
 import { formatCodes, parseCodes } from '../core/match.js';
+import { APP_VERSION } from '../version.js';
+import { backupCard, backupActions } from './backup.js';
+import { checkForUpdates } from './updates.js';
 import { monthKey, isMonthKey, prevMonth, nextMonth, categoriesFor } from '../core/months.js';
 import { monthLog, addPurchase, removePurchase } from '../core/limits.js';
 import { upsertGroup, removeGroup } from '../core/state.js';
@@ -26,6 +29,7 @@ export function render(ctx) {
   return html`
     <section class="screen more">
       <h1 class="screen-title">Ещё</h1>
+      ${backupCard(ctx)}
       <article class="card">
         <header class="month-switch">
           <a class="icon-btn" href="${href('more', prevMonth(month))}" aria-label="Предыдущий месяц">‹</a>
@@ -37,8 +41,20 @@ export function render(ctx) {
       </article>
       ${groupsCard(ctx.state)}
       ${groupDialog()}
+      <article class="card">
+        <h2 class="card-title">О приложении</h2>
+        <p class="muted small">Версия ${APP_VERSION}. Работает без сети после первого открытия.</p>
+        <button type="button" class="btn" data-click="checkUpdates">Проверить обновления</button>
+      </article>
     </section>`;
 }
+
+// 'waiting' has no message: its «Обновить» toast is already shown.
+const UPDATE_MESSAGES = {
+  none: 'Установлена последняя версия',
+  installing: 'Нашлась новая версия — загружаю',
+  unsupported: 'Обновления недоступны: браузер не поддерживает офлайн-режим',
+};
 
 function codesPreview(codes) {
   const shown = formatCodes(codes.slice(0, CODES_PREVIEW));
@@ -173,4 +189,12 @@ export const actions = {
     });
   },
   closeGroupDialog,
+  checkUpdates(ctx) {
+    checkForUpdates(ctx.toast)
+      .then((status) => {
+        if (UPDATE_MESSAGES[status]) ctx.toast(UPDATE_MESSAGES[status]);
+      })
+      .catch((error) => ctx.toast(`Не удалось проверить обновления: ${error.message}`));
+  },
+  ...backupActions,
 };

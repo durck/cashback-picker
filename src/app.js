@@ -7,6 +7,7 @@ import * as categories from './ui/categories.js';
 import * as stores from './ui/stores.js';
 import * as banks from './ui/banks.js';
 import * as more from './ui/more.js';
+import { registerServiceWorker } from './ui/updates.js';
 
 const SCREENS = { pick, categories, stores, banks, more };
 const EVENT_TYPES = ['click', 'input', 'change', 'submit'];
@@ -47,25 +48,35 @@ const toastText = toastEl.querySelector('[data-toast-text]');
 const toastButton = toastEl.querySelector('[data-toast-action]');
 let toastTimer = null;
 let toastAction = null;
+// A persistent toast (update offer) comes back after any transient one.
+let pendingPersistent = null;
 
-function hideToast() {
-  toastEl.hidden = true;
-  toastAction = null;
-}
-
-// toast('Готово') or toast('Удалено', { actionLabel: 'Вернуть', onAction })
-function toast(message, { actionLabel = '', onAction = null } = {}) {
+function showToast(message, actionLabel, onAction) {
   toastText.textContent = message;
   toastButton.textContent = actionLabel;
   toastButton.hidden = !actionLabel;
   toastAction = onAction;
   toastEl.hidden = false;
+}
+
+function hideToast() {
+  toastEl.hidden = true;
+  toastAction = null;
+  if (pendingPersistent) showToast(...pendingPersistent);
+}
+
+// toast('Готово') or toast('Удалено', { actionLabel: 'Вернуть', onAction });
+// persistent toasts stay until their action is used.
+function toast(message, { actionLabel = '', onAction = null, persistent = false } = {}) {
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(hideToast, actionLabel ? TOAST_ACTION_MS : TOAST_MS);
+  if (persistent) pendingPersistent = [message, actionLabel, onAction];
+  showToast(message, actionLabel, onAction);
+  if (!persistent) toastTimer = setTimeout(hideToast, actionLabel ? TOAST_ACTION_MS : TOAST_MS);
 }
 
 toastButton.addEventListener('click', () => {
   const action = toastAction;
+  if (pendingPersistent && action === pendingPersistent[2]) pendingPersistent = null;
   clearTimeout(toastTimer);
   hideToast();
   action?.();
@@ -122,3 +133,6 @@ document.addEventListener('visibilitychange', () => {
 
 render();
 if (LOAD_MESSAGES[loaded.status]) toast(LOAD_MESSAGES[loaded.status]);
+registerServiceWorker(toast);
+// Best effort: asks the browser not to evict localStorage under storage pressure.
+navigator.storage?.persist?.().catch(() => false);
