@@ -9,6 +9,7 @@ import { touchStore, setSetting } from '../core/state.js';
 import {
   html, fmtMoney, fmtPct, fmtReward, fmtMonthRu, parseAmount, bankColor,
 } from './format.js';
+import { href } from './router.js';
 import { storeDialog, openStoreDialog, storeEditorActions } from './store-editor.js';
 
 // Transient input state survives re-renders but is not persisted.
@@ -28,7 +29,8 @@ const logLabel = (target) => (target.kind === 'mcc' ? `MCC ${target.label}` : ta
 export function render(ctx) {
   return html`
     <section class="screen pick">
-      <h1 class="visually-hidden">Где платить</h1>
+      <h1 class="visually-hidden" tabindex="-1">Где платить</h1>
+      <p id="pick-status" class="visually-hidden" role="status">${statusText(ctx)}</p>
       <div class="pick-inputs">
         <input id="pick-query" class="input input-lg" type="search" value="${view.query}"
           placeholder="Магазин, MCC или категория" aria-label="Магазин, MCC-код или категория"
@@ -51,13 +53,14 @@ function resolveTarget(state) {
 
 function results(ctx) {
   const banner = copyBanner(ctx);
+  const notice = html`${banner}${banner ? '' : setupNotice(ctx)}`;
   if (!view.query.trim()) {
-    return html`${banner}${installHint(ctx.state)}${frequentChips(ctx.state)}
+    return html`${notice}${installHint(ctx.state)}${frequentChips(ctx.state)}
       <p class="hint">Введите название магазина, 4-значный MCC-код или категорию, например «АЗС».</p>`;
   }
   const { candidates, target } = resolveTarget(ctx.state);
   if (!target) {
-    return html`${banner}
+    return html`${notice}
       <p class="hint">Ничего не нашлось по запросу «${view.query.trim()}». Введите MCC-код из выписки или добавьте магазин.</p>
       <button type="button" class="btn btn-primary btn-wide" data-click="addStoreFromSearch">
         Добавить магазин «${view.query.trim()}»
@@ -66,10 +69,47 @@ function results(ctx) {
   const amount = parseAmount(view.amountText);
   const ranked = rankBanks(ctx.state, { codes: target.codes, amount, month: monthKey(ctx.now()) });
   return html`
-    ${banner}
+    ${notice}
     ${targetHeader(target, amount)}
     ${alternatives(candidates, target)}
-    <ol class="bank-list">${ranked.map((row, index) => bankRow(row, index === 0 && row.value > 0))}</ol>`;
+    ${ranked.length ? bankList(ranked) : ''}`;
+}
+
+function bankList(ranked) {
+  const partialNote = ranked.some((row) => row.partial)
+    ? html`<p class="hint small">«Частично» — категория банка покрывает не все MCC этой группы. Кешбэк зависит от кода терминала: проверьте по выписке.</p>`
+    : '';
+  return html`
+    <ol class="bank-list" role="list">${ranked.map((row, index) => bankRow(row, index === 0 && row.value > 0))}</ol>
+    ${partialNote}`;
+}
+
+// What the screen cannot do yet: no enabled banks, or no categories this month.
+function setupNotice(ctx) {
+  const { state } = ctx;
+  if (!state.banks.some((bank) => bank.enabled)) {
+    return html`
+      <div class="banner banner-info">
+        <p>Все банки выключены, сравнивать нечего.</p>
+        <a class="btn" href="${href('banks')}">Включить банки</a>
+      </div>`;
+  }
+  const month = monthKey(ctx.now());
+  if (hasCategories(state, month)) return '';
+  return html`
+    <div class="banner banner-info">
+      <p>Категории на ${fmtMonthRu(month).toLowerCase()} не заданы: считаю только по базовым процентам.</p>
+      <a class="btn" href="${href('categories', month)}">Задать категории</a>
+    </div>`;
+}
+
+// Short summary for screen readers; the visual list updates silently while typing.
+function statusText(ctx) {
+  if (!view.query.trim()) return '';
+  const { target } = resolveTarget(ctx.state);
+  if (!target) return 'Ничего не нашлось';
+  const [top] = rankBanks(ctx.state, { codes: target.codes, month: monthKey(ctx.now()) });
+  return top ? `${target.label}: выгоднее всего ${top.bank.name}, ${fmtPct(top.pct)}` : 'Все банки выключены';
 }
 
 function copyBanner(ctx) {
@@ -107,7 +147,7 @@ function frequentChips(state) {
   if (stores.length === 0) return '';
   const chips = stores.map((store) => html`
     <button type="button" class="chip chip-lg" data-click="pickStore" data-id="${store.id}">${store.name}</button>`);
-  return html`<div class="chips" aria-label="Частые магазины">${chips}</div>`;
+  return html`<div class="chips" role="group" aria-label="Частые магазины">${chips}</div>`;
 }
 
 function targetHeader(target, amount) {
@@ -130,7 +170,7 @@ function alternatives(candidates, target) {
     <button type="button" class="chip" data-click="choose" data-key="${candidateKey(c)}">
       ${c.kind === 'group' ? 'Категория: ' : ''}${c.label}
     </button>`);
-  return html`<div class="chips" aria-label="Другие варианты">${chips}</div>`;
+  return html`<div class="chips" role="group" aria-label="Другие варианты">${chips}</div>`;
 }
 
 function categoryLabel(row) {
@@ -138,7 +178,8 @@ function categoryLabel(row) {
   if (row.exhausted === 'category') {
     return html`${row.exhaustedCategory.name}: <span class="warn">лимит исчерпан</span> · базовый`;
   }
-  return row.category ? html`${row.category.name}` : 'базовый';
+  if (!row.category) return 'базовый';
+  return row.partial ? html`${row.category.name} · <span class="warn">частично</span>` : row.category.name;
 }
 
 function balanceLine(row) {
@@ -167,6 +208,7 @@ function bankRow(row, isBest) {
       style="--bank-color: ${bankColor(row.bank.color)}">
       <span class="bank-dot" aria-hidden="true"></span>
       <div class="bank-main">
+        ${isBest ? html`<span class="visually-hidden">Выгоднее всего: </span>` : ''}
         <div class="bank-name">${row.bank.name}</div>
         <div class="bank-cat">${categoryLabel(row)}</div>
         ${balanceLine(row)}
@@ -181,6 +223,7 @@ function bankRow(row, isBest) {
 
 function refreshResults(ctx) {
   ctx.patch('#pick-results', results(ctx));
+  ctx.patch('#pick-status', html`${statusText(ctx)}`);
 }
 
 function askForAmount(ctx) {

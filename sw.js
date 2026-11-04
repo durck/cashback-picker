@@ -1,6 +1,6 @@
 // Offline cache for the app shell. Bump VERSION (and src/version.js) on every
 // release: a new VERSION installs a new cache and the page offers «Обновить».
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const CACHE = `cashback-${VERSION}`;
 const CACHE_PREFIX = 'cashback-';
 
@@ -27,8 +27,10 @@ const ASSETS = [
   './src/ui/banks.js',
   './src/ui/categories.js',
   './src/ui/format.js',
+  './src/ui/forms.js',
   './src/ui/more.js',
   './src/ui/pick.js',
+  './src/ui/recovery.js',
   './src/ui/router.js',
   './src/ui/store-editor.js',
   './src/ui/store.js',

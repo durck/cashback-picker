@@ -3,16 +3,19 @@ import { upsertBank, moveBank } from '../core/state.js';
 import {
   html, fmtPct, fmtNumber, fmtReward, parseDecimal, bankColor,
 } from './format.js';
+import { clearFormError, showFormError } from './forms.js';
 
 const DIALOG_ID = 'bank-dialog';
 
 export function render(ctx) {
   const banks = [...ctx.state.banks].sort((a, b) => a.order - b.order);
+  const allOff = banks.every((bank) => !bank.enabled);
   return html`
     <section class="screen banks">
-      <h1 class="screen-title">Банки</h1>
+      <h1 class="screen-title" tabindex="-1">Банки</h1>
       <p class="muted small">Проценты и лимиты возьмите из приложения банка. Выключенные банки не участвуют в подборе.</p>
-      <ul class="plain-list">${banks.map((bank, index) => bankCard(bank, index, banks.length))}</ul>
+      ${allOff ? html`<p class="warn small">Все банки выключены: включите хотя бы один, иначе сравнивать нечего.</p>` : ''}
+      <ul class="plain-list" role="list">${banks.map((bank, index) => bankCard(bank, index, banks.length))}</ul>
       ${bankDialog()}
     </section>`;
 }
@@ -55,10 +58,10 @@ function bankDialog() {
         <h2 id="bank-dialog-title" class="sheet-title">Банк</h2>
         <input type="hidden" name="bankId">
         <div class="field-row">
-          <label class="field">Название <input class="input" name="name" maxlength="30" autocomplete="off"></label>
+          <label class="field">Название <input class="input" name="name" maxlength="30" autocomplete="off" required></label>
           <label class="field field-color">Цвет <input class="input" type="color" name="color"></label>
         </div>
-        <label class="field">Базовый кешбэк, % <input class="input" name="basePercent" inputmode="decimal" autocomplete="off"></label>
+        <label class="field">Базовый кешбэк, % <input class="input" name="basePercent" inputmode="decimal" autocomplete="off" required></label>
         <label class="field">Чем начисляется
           <select class="input" name="rewardType" data-change="rewardTypeChanged">
             <option value="rub">Рубли</option>
@@ -99,7 +102,7 @@ function openBankDialog(bank) {
   elements.pointsName.value = bank.pointsName ?? '';
   elements.valueCoef.value = decimalText(bank.valueCoef);
   elements.monthlyLimit.value = decimalText(bank.monthlyLimit);
-  form.querySelector('.form-error').textContent = '';
+  clearFormError(form);
   syncPointsFields(form);
   dialog.showModal();
 }
@@ -120,22 +123,27 @@ function bankFields(data) {
 }
 
 function bankFieldsError(fields) {
-  if (!fields.name) return 'Укажите название банка.';
-  if (fields.basePercent === null || fields.basePercent > 100) return 'Базовый процент — число от 0 до 100.';
-  if (fields.valueCoef === null || fields.valueCoef > 1) return 'Ценность бонуса — число от 0 до 1, например 0,8.';
-  if (fields.limitText && fields.monthlyLimit === null) return 'Лимит — неотрицательное число.';
+  if (!fields.name) return { error: 'Укажите название банка.', field: 'name' };
+  if (fields.basePercent === null || fields.basePercent > 100) {
+    return { error: 'Базовый процент — число от 0 до 100.', field: 'basePercent' };
+  }
+  if (fields.valueCoef === null || fields.valueCoef > 1) {
+    return { error: 'Ценность бонуса — число от 0 до 1, например 0,8.', field: 'valueCoef' };
+  }
+  if (fields.limitText && fields.monthlyLimit === null) return { error: 'Лимит — неотрицательное число.', field: 'monthlyLimit' };
   return null;
 }
 
-// Returns { bank } or { error } from the dialog values.
+// Returns { bank } or { error, field } from the dialog values.
 function readBank(ctx, form) {
   const data = new FormData(form);
   const bank = ctx.state.banks.find((b) => b.id === data.get('bankId'));
   if (!bank) return { error: 'Банк не найден.' };
   const parsed = bankFields(data);
-  const error = bankFieldsError(parsed);
+  const problem = bankFieldsError(parsed);
+  if (problem) return problem;
   const { limitText, ...fields } = parsed;
-  return error ? { error } : { bank: { ...bank, ...fields } };
+  return { bank: { ...bank, ...fields } };
 }
 
 function closeBankDialog() {
@@ -160,7 +168,7 @@ export const actions = {
   saveBank(ctx, form) {
     const result = readBank(ctx, form);
     if (result.error) {
-      form.querySelector('.form-error').textContent = result.error;
+      showFormError(form, result);
       return;
     }
     closeBankDialog();

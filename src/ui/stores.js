@@ -10,10 +10,10 @@ export function render(ctx) {
   return html`
     <section class="screen stores">
       <header class="screen-head">
-        <h1 class="screen-title">Магазины</h1>
+        <h1 class="screen-title" tabindex="-1">Магазины</h1>
         <button type="button" class="btn btn-primary" data-click="addStore">+ Магазин</button>
       </header>
-      <input class="input" type="search" value="${view.query}" placeholder="Найти магазин"
+      <input id="stores-filter" class="input" type="search" value="${view.query}" placeholder="Найти магазин"
         aria-label="Найти магазин" autocomplete="off" data-input="filterStores">
       <div id="stores-list">${storeList(ctx.state)}</div>
       ${storeDialog()}
@@ -47,12 +47,18 @@ function storeRow(state, store) {
     </li>`;
 }
 
+function emptyList() {
+  const query = view.query.trim();
+  if (!query) return html`<p class="hint">Магазинов пока нет. Добавьте первый кнопкой «+ Магазин».</p>`;
+  return html`
+    <p class="hint">Ничего не нашлось по запросу «${query}».</p>
+    <button type="button" class="btn btn-primary btn-wide" data-click="addStore">Добавить магазин «${query}»</button>`;
+}
+
 function storeList(state) {
   const stores = visibleStores(state);
-  if (stores.length === 0) {
-    return html`<p class="hint">Не нашлось. Добавьте магазин кнопкой «+ Магазин».</p>`;
-  }
-  return html`<ul class="plain-list card">${stores.map((store) => storeRow(state, store))}</ul>`;
+  if (stores.length === 0) return emptyList();
+  return html`<ul class="plain-list card" role="list">${stores.map((store) => storeRow(state, store))}</ul>`;
 }
 
 export const actions = {

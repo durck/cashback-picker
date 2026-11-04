@@ -8,6 +8,7 @@ import { remaining } from '../core/limits.js';
 import {
   html, fmtPct, fmtReward, fmtMonthRu, parseDecimal, bankColor,
 } from './format.js';
+import { clearFormError, showFormError } from './forms.js';
 import { href } from './router.js';
 
 const MAX_CODES_SHOWN = 6;
@@ -23,14 +24,22 @@ export function render(ctx) {
   return html`
     <section class="screen categories">
       <header class="month-switch">
-        <a class="icon-btn" href="${href('categories', prevMonth(month))}" aria-label="Предыдущий месяц">‹</a>
-        <h1 class="screen-title">${fmtMonthRu(month)}</h1>
-        <a class="icon-btn" href="${href('categories', nextMonth(month))}" aria-label="Следующий месяц">›</a>
+        <a id="month-prev" class="icon-btn" href="${href('categories', prevMonth(month))}" aria-label="Предыдущий месяц">‹</a>
+        <h1 class="screen-title" tabindex="-1"><span class="visually-hidden">Категории: </span>${fmtMonthRu(month)}</h1>
+        <a id="month-next" class="icon-btn" href="${href('categories', nextMonth(month))}" aria-label="Следующий месяц">›</a>
       </header>
-      ${copyBar(ctx.state, month)}
+      ${banks.length ? copyBar(ctx.state, month) : noBanksNotice()}
       ${banks.map((bank) => bankCard(ctx.state, bank, month))}
       ${dialog(ctx.state)}
     </section>`;
+}
+
+function noBanksNotice() {
+  return html`
+    <div class="banner banner-info">
+      <p>Все банки выключены, поэтому категории задавать некому.</p>
+      <a class="btn" href="${href('banks')}">Включить банки</a>
+    </div>`;
 }
 
 function copyBar(state, month) {
@@ -73,7 +82,7 @@ function bankCard(state, bank, month) {
   const categories = categoriesFor(state, month, bank.id);
   const unit = bank.rewardType === 'points' ? bank.pointsName || 'баллы' : 'рубли';
   const list = categories.length
-    ? html`<ul class="cat-list">${categories.map((c) => categoryRow(state, bank, month, c))}</ul>`
+    ? html`<ul class="cat-list" role="list">${categories.map((c) => categoryRow(state, bank, month, c))}</ul>`
     : html`<p class="muted small">Категорий нет — везде базовый ${fmtPct(bank.basePercent)}.</p>`;
   return html`
     <article class="card" style="--bank-color: ${bankColor(bank.color)}">
@@ -88,12 +97,25 @@ function bankCard(state, bank, month) {
 }
 
 function dialog(state) {
-  const groups = state.mccGroups.map((g) => html`<option value="${g.id}">${g.name}</option>`);
   return html`
     <dialog id="category-dialog" class="sheet" aria-labelledby="category-dialog-title">
       <form data-submit="saveCategory" novalidate>
         <h2 id="category-dialog-title" class="sheet-title">Категория</h2>
         <input type="hidden" name="bankId"><input type="hidden" name="categoryId">
+        ${dialogFields(state)}
+        <p class="form-error" role="alert"></p>
+        <div class="sheet-actions">
+          <button type="button" class="btn btn-danger" data-click="deleteCategory">Удалить</button>
+          <button type="button" class="btn" data-click="closeDialog">Отмена</button>
+          <button type="submit" class="btn btn-primary">Сохранить</button>
+        </div>
+      </form>
+    </dialog>`;
+}
+
+function dialogFields(state) {
+  const groups = state.mccGroups.map((g) => html`<option value="${g.id}">${g.name}</option>`);
+  return html`
         <label class="field">Группа MCC
           <select class="input" name="groupId" data-change="pickGroup">
             <option value="">Свои коды</option>${groups}
@@ -103,22 +125,14 @@ function dialog(state) {
           <input class="input" name="name" maxlength="40" autocomplete="off">
         </label>
         <label class="field">Процент кешбэка
-          <input class="input" name="percent" inputmode="decimal" autocomplete="off" placeholder="5">
+          <input class="input" name="percent" inputmode="decimal" autocomplete="off" placeholder="5" required>
         </label>
         <label class="field">MCC-коды
-          <input class="input" name="codes" autocomplete="off" placeholder="5411, 5499, 3000-3299">
+          <input class="input" name="codes" autocomplete="off" placeholder="5411, 5499, 3000-3299" required>
         </label>
         <label class="field"><span>Лимит в месяц, <span data-unit>рубли</span> (необязательно)</span>
           <input class="input" name="limit" inputmode="decimal" autocomplete="off">
-        </label>
-        <p class="form-error" role="alert"></p>
-        <div class="sheet-actions">
-          <button type="button" class="btn btn-danger" data-click="deleteCategory">Удалить</button>
-          <button type="button" class="btn" data-click="closeDialog">Отмена</button>
-          <button type="submit" class="btn btn-primary">Сохранить</button>
-        </div>
-      </form>
-    </dialog>`;
+        </label>`;
 }
 
 function openDialog(ctx, bankId, category) {
@@ -137,7 +151,7 @@ function openDialog(ctx, bankId, category) {
   form.querySelector('[data-unit]').textContent = bank.rewardType === 'points' ? bank.pointsName || 'баллы' : 'рубли';
   form.querySelector('.sheet-title').textContent = `${bank.name}: ${category ? 'категория' : 'новая категория'}`;
   form.querySelector('[data-click="deleteCategory"]').hidden = !category;
-  form.querySelector('.form-error').textContent = '';
+  clearFormError(form);
   dialogEl.showModal();
 }
 
@@ -156,20 +170,22 @@ function categoryFields(state, data) {
 }
 
 function categoryFieldsError(fields) {
-  if (!fields.name) return 'Укажите название или выберите группу.';
-  if (fields.percent === null || fields.percent <= 0 || fields.percent > 100) return 'Процент — число от 0 до 100.';
-  if (fields.codeErrors.length) return `Не понял коды: ${fields.codeErrors.join(', ')}`;
-  if (fields.codes.length === 0) return 'Выберите группу или введите MCC-коды.';
-  if (fields.limitText && fields.limit === null) return 'Лимит — неотрицательное число.';
+  if (!fields.name) return { error: 'Укажите название или выберите группу.', field: 'name' };
+  if (fields.percent === null || fields.percent <= 0 || fields.percent > 100) {
+    return { error: 'Процент — число от 0 до 100.', field: 'percent' };
+  }
+  if (fields.codeErrors.length) return { error: `Не понял коды: ${fields.codeErrors.join(', ')}`, field: 'codes' };
+  if (fields.codes.length === 0) return { error: 'Выберите группу или введите MCC-коды.', field: 'codes' };
+  if (fields.limitText && fields.limit === null) return { error: 'Лимит — неотрицательное число.', field: 'limit' };
   return null;
 }
 
-// Returns { category } or { error } from the dialog form values.
+// Returns { category } or { error, field } from the dialog form values.
 function readCategory(ctx, form) {
   const data = new FormData(form);
   const fields = categoryFields(ctx.state, data);
-  const error = categoryFieldsError(fields);
-  if (error) return { error };
+  const problem = categoryFieldsError(fields);
+  if (problem) return problem;
   const { name, percent, codes, limit } = fields;
   return { category: { id: String(data.get('categoryId')) || ctx.newId(), name, percent, codes, limit } };
 }
@@ -207,7 +223,7 @@ export const actions = {
   saveCategory(ctx, form) {
     const result = readCategory(ctx, form);
     if (result.error) {
-      form.querySelector('.form-error').textContent = result.error;
+      showFormError(form, result);
       return;
     }
     const target = { month: currentMonth(ctx), bankId: form.elements.bankId.value, category: result.category };

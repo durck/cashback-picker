@@ -4,6 +4,7 @@ import {
 } from '../core/state.js';
 import { dateKey } from '../core/months.js';
 import { html, fmtDay } from './format.js';
+import { clearFormError, showFormError } from './forms.js';
 
 const MAX_IMPORT_BYTES = 5 * 1024 * 1024;
 const IMPORT_EXTENSION = /\.(json|txt)$/i;
@@ -12,7 +13,7 @@ const IMPORT_TYPES = new Set(['application/json', 'text/plain']);
 const IMPORT_DIALOG_ID = 'import-dialog';
 const TEXT_DIALOG_ID = 'text-dialog';
 
-// Validated document waiting for the user's confirmation.
+// Validated document waiting for the user's confirmation: { state, doneMessage }.
 let pendingImport = null;
 
 export function backupCard(ctx) {
@@ -22,7 +23,7 @@ export function backupCard(ctx) {
     ? html`<p class="warn small">Сделайте резервную копию: последней больше 30 дней или её не было.</p>`
     : '';
   const undo = ctx.store.hasBackup()
-    ? html`<button type="button" class="btn btn-ghost" data-click="undoImport">Вернуть данные до импорта</button>`
+    ? html`<button type="button" class="btn btn-ghost" data-click="undoImport">Вернуть предыдущие данные</button>`
     : '';
   return html`
     <article class="card">
@@ -64,7 +65,8 @@ function textDialog() {
     <dialog id="${TEXT_DIALOG_ID}" class="sheet" aria-labelledby="text-dialog-title">
       <form data-submit="checkPasted" novalidate>
         <h2 id="text-dialog-title" class="sheet-title"></h2>
-        <textarea class="input mono" name="json" rows="8" spellcheck="false" autocomplete="off"></textarea>
+        <textarea class="input mono" name="json" rows="8" spellcheck="false" autocomplete="off"
+          aria-labelledby="text-dialog-title"></textarea>
         <p class="form-error" role="alert"></p>
         <div class="sheet-actions">
           <button type="button" class="btn" data-click="closeTextDialog">Закрыть</button>
@@ -83,7 +85,7 @@ function openTextDialog(mode, text) {
   form.elements.json.value = text;
   form.elements.json.readOnly = mode === 'export';
   form.querySelectorAll('[data-mode]').forEach((button) => { button.hidden = button.dataset.mode !== mode; });
-  form.querySelector('.form-error').textContent = '';
+  clearFormError(form);
   dialog.showModal();
 }
 
@@ -93,14 +95,21 @@ function summaryText(state) {
     + `категорий: ${s.categories} (месяцев: ${s.months}) · покупок: ${s.purchases}.`;
 }
 
+// Asks for confirmation before a document replaces everything.
+export function offerReplace(state, { intro, outro = '', doneMessage }) {
+  pendingImport = { state, doneMessage };
+  const dialog = document.getElementById(IMPORT_DIALOG_ID);
+  dialog.querySelector('[data-import-summary]').textContent = `${intro}: ${summaryText(state)}${outro}`;
+  dialog.showModal();
+}
+
 // Returns an error message, or null when the document is ready to confirm.
-function prepareImport(text) {
+// beforeConfirm closes whatever dialog the text came from, so focus stays in the new one.
+function prepareImport(text, beforeConfirm = () => {}) {
   const result = importDoc(text);
   if (!result.ok) return result.error;
-  pendingImport = result.state;
-  const dialog = document.getElementById(IMPORT_DIALOG_ID);
-  dialog.querySelector('[data-import-summary]').textContent = `В файле: ${summaryText(result.state)}`;
-  dialog.showModal();
+  beforeConfirm();
+  offerReplace(result.state, { intro: 'В файле', doneMessage: 'Данные заменены' });
   return null;
 }
 
@@ -122,6 +131,22 @@ function downloadFile(file) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
+// Resolves to true once the file is handed over, false if the user cancelled.
+// navigator.share must start synchronously inside the click to keep user activation.
+export function saveFile(file, title) {
+  if (!navigator.canShare?.({ files: [file] })) {
+    downloadFile(file);
+    return Promise.resolve(true);
+  }
+  return navigator.share({ files: [file], title })
+    .then(() => true)
+    .catch((error) => {
+      if (error.name === 'AbortError') return false;
+      downloadFile(file);
+      return true;
+    });
+}
+
 function markExported(ctx) {
   ctx.store.set((state) => setSetting(state, 'lastExportAt', ctx.now().toISOString()));
   ctx.toast('Резервная копия сохранена');
@@ -129,26 +154,18 @@ function markExported(ctx) {
 
 function undoImport(ctx) {
   const result = ctx.store.restoreBackup();
-  ctx.toast(result.ok ? 'Данные до импорта возвращены' : `Не удалось вернуть: ${result.error}`);
+  ctx.toast(result.ok ? 'Предыдущие данные возвращены' : `Не удалось вернуть: ${result.error}`);
 }
 
 export const backupActions = {
-  // navigator.share must run synchronously inside the click to keep user activation.
   exportBackup(ctx) {
     const now = ctx.now();
     const file = new File([exportDoc(ctx.state, { now })], `cashback-picker-${dateKey(now)}.json`, { type: 'application/json' });
-    if (!navigator.canShare?.({ files: [file] })) {
-      downloadFile(file);
-      markExported(ctx);
-      return;
-    }
-    navigator.share({ files: [file], title: 'Резервная копия «Какой картой?»' })
-      .then(() => markExported(ctx))
-      .catch((error) => {
-        if (error.name === 'AbortError') return;
-        downloadFile(file);
-        markExported(ctx);
-      });
+    saveFile(file, 'Резервная копия «Какой картой?»')
+      .then((saved) => {
+        if (saved) markExported(ctx);
+      })
+      .catch((error) => ctx.toast(`Не удалось сохранить файл: ${error.message}`));
   },
   showExportText(ctx) {
     openTextDialog('export', exportDoc(ctx.state, { now: ctx.now() }));
@@ -166,9 +183,8 @@ export const backupActions = {
     openTextDialog('paste', '');
   },
   checkPasted(ctx, form) {
-    const error = prepareImport(form.elements.json.value);
-    if (error) form.querySelector('.form-error').textContent = error;
-    else document.getElementById(TEXT_DIALOG_ID).close();
+    const error = prepareImport(form.elements.json.value, () => document.getElementById(TEXT_DIALOG_ID).close());
+    if (error) showFormError(form, { error, field: 'json' });
   },
   closeTextDialog() {
     document.getElementById(TEXT_DIALOG_ID)?.close();
@@ -190,16 +206,16 @@ export const backupActions = {
       .catch((error) => ctx.toast(`Не удалось прочитать файл: ${error.message}`));
   },
   confirmImport(ctx) {
-    const next = pendingImport;
+    const pending = pendingImport;
     pendingImport = null;
     document.getElementById(IMPORT_DIALOG_ID)?.close();
-    if (!next) return;
-    const result = ctx.store.replace(next);
+    if (!pending) return;
+    const result = ctx.store.replace(pending.state);
     if (!result.ok) {
-      ctx.toast('Импорт не выполнен: не хватает места в браузере для резервной копии');
+      ctx.toast('Не выполнено: не хватает места в браузере для резервной копии');
       return;
     }
-    ctx.toast('Данные заменены', { actionLabel: 'Отменить импорт', onAction: () => undoImport(ctx) });
+    ctx.toast(pending.doneMessage, { actionLabel: 'Отменить', onAction: () => undoImport(ctx) });
   },
   cancelImport() {
     pendingImport = null;

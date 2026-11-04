@@ -43,9 +43,12 @@
     </a>
   </nav>
 
-  <div id="toast" class="toast" role="status" aria-live="polite" hidden>
-    <span data-toast-text></span>
-    <button type="button" class="toast-action" data-toast-action hidden></button>
+  <!-- The live region stays in the DOM: a region that appears with its text is often not announced. -->
+  <div class="toast-region" role="status" aria-live="polite">
+    <div id="toast" class="toast" hidden>
+      <span data-toast-text></span>
+      <button type="button" class="toast-action" data-toast-action hidden></button>
+    </div>
   </div>
 </body>
 </html>

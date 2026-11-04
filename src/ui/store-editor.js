@@ -3,6 +3,7 @@
 import { includesMcc, formatMcc } from '../core/match.js';
 import { upsertStore, removeStore } from '../core/state.js';
 import { html } from './format.js';
+import { clearFormError, showFormError } from './forms.js';
 
 const DIALOG_ID = 'store-dialog';
 
@@ -13,16 +14,16 @@ export function storeDialog() {
         <h2 id="store-dialog-title" class="sheet-title">Магазин</h2>
         <input type="hidden" name="storeId">
         <label class="field">Название
-          <input class="input" name="name" maxlength="60" autocomplete="off">
+          <input class="input" name="name" maxlength="60" autocomplete="off" required>
         </label>
         <label class="field">Другие названия через запятую
           <input class="input" name="aliases" autocomplete="off" placeholder="пятерка, 5ка">
         </label>
         <label class="field">MCC-код (из выписки или чека)
           <input class="input" name="mcc" inputmode="numeric" maxlength="4" autocomplete="off"
-            placeholder="5411" data-input="storeMccHint">
+            placeholder="5411" data-input="storeMccHint" aria-describedby="store-mcc-hint" required>
         </label>
-        <p class="muted small" data-mcc-hint></p>
+        <p id="store-mcc-hint" class="muted small" data-mcc-hint></p>
         <label class="field">Заметка
           <input class="input" name="note" maxlength="80" autocomplete="off">
         </label>
@@ -56,18 +57,18 @@ export function openStoreDialog(ctx, store, prefill = {}) {
   form.querySelector('[data-mcc-hint]').textContent = store ? mccHint(ctx.state, formatMcc(store.mcc)) : '';
   form.querySelector('.sheet-title').textContent = store ? 'Магазин' : 'Новый магазин';
   form.querySelector('[data-click="deleteStore"]').hidden = !store;
-  form.querySelector('.form-error').textContent = '';
+  clearFormError(form);
   dialog.showModal();
   if (!store) form.elements[prefill.name ? 'mcc' : 'name'].focus();
 }
 
-// Returns { store } or { error }; keeps usage counters of an existing store.
+// Returns { store } or { error, field }; keeps usage counters of an existing store.
 function readStore(ctx, form) {
   const data = new FormData(form);
   const name = String(data.get('name')).trim();
   const mccText = String(data.get('mcc')).trim();
-  if (!name) return { error: 'Укажите название магазина.' };
-  if (!/^\d{1,4}$/.test(mccText)) return { error: 'MCC — до четырёх цифр, например 5411.' };
+  if (!name) return { error: 'Укажите название магазина.', field: 'name' };
+  if (!/^\d{1,4}$/.test(mccText)) return { error: 'MCC — до четырёх цифр, например 5411.', field: 'mcc' };
   const id = String(data.get('storeId'));
   const existing = ctx.state.stores.find((s) => s.id === id);
   const aliases = String(data.get('aliases')).split(',').map((a) => a.trim()).filter(Boolean);
@@ -93,7 +94,7 @@ export function storeEditorActions({ onSave = () => {} } = {}) {
     saveStore(ctx, form) {
       const result = readStore(ctx, form);
       if (result.error) {
-        form.querySelector('.form-error').textContent = result.error;
+        showFormError(form, result);
         return;
       }
       closeStoreDialog();

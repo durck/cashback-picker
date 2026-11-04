@@ -2,6 +2,8 @@
 import { formatCodes, parseCodes } from '../core/match.js';
 import { APP_VERSION } from '../version.js';
 import { backupCard, backupActions } from './backup.js';
+import { clearFormError, showFormError } from './forms.js';
+import { corruptCard, recoveryActions } from './recovery.js';
 import { checkForUpdates } from './updates.js';
 import { monthKey, isMonthKey, prevMonth, nextMonth, categoriesFor } from '../core/months.js';
 import { monthLog, addPurchase, removePurchase } from '../core/limits.js';
@@ -14,6 +16,8 @@ import { href } from './router.js';
 const RUB = { rewardType: 'rub' };
 const GROUP_DIALOG_ID = 'group-dialog';
 const CODES_PREVIEW = 8;
+// Keeps the reference open across re-renders, e.g. after saving a group.
+const view = { groupsOpen: false };
 
 function currentMonth(ctx) {
   const [month] = ctx.route.params;
@@ -28,13 +32,14 @@ export function render(ctx) {
     : html`<p class="muted small">За этот месяц записей нет. Кнопка «Записать» на главном экране добавляет покупку сюда.</p>`;
   return html`
     <section class="screen more">
-      <h1 class="screen-title">Ещё</h1>
+      <h1 class="screen-title" tabindex="-1">Ещё</h1>
+      ${corruptCard(ctx)}
       ${backupCard(ctx)}
       <article class="card">
         <header class="month-switch">
-          <a class="icon-btn" href="${href('more', prevMonth(month))}" aria-label="Предыдущий месяц">‹</a>
+          <a id="log-month-prev" class="icon-btn" href="${href('more', prevMonth(month))}" aria-label="Предыдущий месяц">‹</a>
           <h2 class="card-title">Покупки · ${fmtMonthRu(month)}</h2>
-          <a class="icon-btn" href="${href('more', nextMonth(month))}" aria-label="Следующий месяц">›</a>
+          <a id="log-month-next" class="icon-btn" href="${href('more', nextMonth(month))}" aria-label="Следующий месяц">›</a>
         </header>
         ${entries.length ? html`<p class="muted small">Записей: ${entries.length}</p>` : ''}
         ${list}
@@ -72,11 +77,14 @@ function groupsCard(state) {
         <span class="muted" aria-hidden="true">›</span>
       </button>
     </li>`);
+  const list = rows.length
+    ? html`<ul class="plain-list" role="list">${rows}</ul>`
+    : html`<p class="muted small">Групп нет. Добавьте первую — из неё удобно создавать категории.</p>`;
   return html`
-    <details class="card">
-      <summary class="card-title">Справочник MCC-групп (${state.mccGroups.length})</summary>
+    <details class="card" ${view.groupsOpen ? 'open' : ''}>
+      <summary class="card-title" data-click="toggleGroups">Справочник MCC-групп (${state.mccGroups.length})</summary>
       <p class="muted small">Группы — заготовки для категорий. Правка группы не меняет уже созданные категории.</p>
-      <ul class="plain-list">${rows}</ul>
+      ${list}
       <button type="button" class="btn btn-ghost" data-click="addGroup">+ Группа</button>
     </details>`;
 }
@@ -87,9 +95,9 @@ function groupDialog() {
       <form data-submit="saveGroup" novalidate>
         <h2 id="group-dialog-title" class="sheet-title">MCC-группа</h2>
         <input type="hidden" name="groupId">
-        <label class="field">Название <input class="input" name="name" maxlength="40" autocomplete="off"></label>
+        <label class="field">Название <input class="input" name="name" maxlength="40" autocomplete="off" required></label>
         <label class="field">MCC-коды, диапазоны через дефис
-          <textarea class="input" name="codes" rows="3" autocomplete="off" placeholder="5411, 5499, 3000-3299"></textarea>
+          <textarea class="input" name="codes" rows="3" autocomplete="off" placeholder="5411, 5499, 3000-3299" required></textarea>
         </label>
         <p class="form-error" role="alert"></p>
         <div class="sheet-actions">
@@ -110,7 +118,7 @@ function openGroupDialog(group) {
   form.elements.codes.value = group ? formatCodes(group.codes) : '';
   form.querySelector('.sheet-title').textContent = group ? 'MCC-группа' : 'Новая MCC-группа';
   form.querySelector('[data-click="deleteGroup"]').hidden = !group;
-  form.querySelector('.form-error').textContent = '';
+  clearFormError(form);
   dialog.showModal();
 }
 
@@ -119,9 +127,9 @@ function readGroup(ctx, form) {
   const data = new FormData(form);
   const name = String(data.get('name')).trim();
   const { codes, errors } = parseCodes(data.get('codes'));
-  if (!name) return { error: 'Укажите название группы.' };
-  if (errors.length) return { error: `Не понял коды: ${errors.join(', ')}` };
-  if (codes.length === 0) return { error: 'Нужен хотя бы один MCC-код.' };
+  if (!name) return { error: 'Укажите название группы.', field: 'name' };
+  if (errors.length) return { error: `Не понял коды: ${errors.join(', ')}`, field: 'codes' };
+  if (codes.length === 0) return { error: 'Нужен хотя бы один MCC-код.', field: 'codes' };
   return { group: { id: String(data.get('groupId')) || ctx.newId(), name, codes } };
 }
 
@@ -161,6 +169,10 @@ export const actions = {
       onAction: () => ctx.store.set((state) => addPurchase(state, entry)),
     });
   },
+  // Runs before the browser toggles the element.
+  toggleGroups(ctx, el) {
+    view.groupsOpen = !el.closest('details').open;
+  },
   addGroup() {
     openGroupDialog(null);
   },
@@ -171,7 +183,7 @@ export const actions = {
   saveGroup(ctx, form) {
     const result = readGroup(ctx, form);
     if (result.error) {
-      form.querySelector('.form-error').textContent = result.error;
+      showFormError(form, result);
       return;
     }
     closeGroupDialog();
@@ -197,4 +209,5 @@ export const actions = {
       .catch((error) => ctx.toast(`Не удалось проверить обновления: ${error.message}`));
   },
   ...backupActions,
+  ...recoveryActions,
 };
