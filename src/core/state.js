@@ -8,6 +8,7 @@ import { isMonthKey } from './months.js';
 export const SCHEMA_VERSION = 1;
 export const STORAGE_KEY = 'cashbackPicker.state';
 export const BACKUP_KEY = `${STORAGE_KEY}.backup`;
+export const CORRUPT_KEY = `${STORAGE_KEY}.corrupt`;
 export const APP_MARKER = 'cashback-picker';
 const EXPORT_REMINDER_DAYS = 30;
 const DAY_MS = 24 * 60 * 60 * 1000;
@@ -131,14 +132,33 @@ function upgrade(doc) {
   return { ok: true, state: migrated, migrated: version < SCHEMA_VERSION };
 }
 
-function keepCorrupt(storage, raw) {
+export function keepCorrupt(storage, raw) {
   try {
-    storage.setItem(`${STORAGE_KEY}.corrupt`, raw);
+    storage.setItem(CORRUPT_KEY, raw);
     return true;
   } catch {
     return false;
   }
 }
+
+export function loadCorrupt(storage) {
+  try {
+    return storage.getItem(CORRUPT_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function removeKey(storage, key) {
+  try {
+    storage.removeItem(key);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export const clearCorrupt = (storage) => removeKey(storage, CORRUPT_KEY);
 
 // status: 'fresh' | 'loaded' | 'migrated' | 'recovered' | 'unavailable'
 export function load(storage) {
@@ -222,13 +242,54 @@ export function loadBackup(storage) {
   return parsed.ok ? upgrade(parsed.value) : parsed;
 }
 
-export function clearBackup(storage) {
-  try {
-    storage.removeItem(BACKUP_KEY);
-    return true;
-  } catch {
-    return false;
+export const clearBackup = (storage) => removeKey(storage, BACKUP_KEY);
+
+// --- Salvaging a damaged copy ---------------------------------------------
+
+const asList = (value) => (Array.isArray(value) ? value : []);
+const isValidRecord = (record, rules) => Object.entries(rules).every(([field, check]) => check(record?.[field]));
+
+function salvageRecords(items, rules, fieldDefaults = {}) {
+  const list = asList(items);
+  const valid = list.map((item) => ({ ...fieldDefaults, ...item })).filter((item) => isValidRecord(item, rules));
+  return { valid, dropped: list.length - valid.length };
+}
+
+function salvagePlans(items) {
+  const list = asList(items);
+  const usable = list.filter((plan) => isMonthKey(plan?.month) && isText(plan?.bankId) && Array.isArray(plan?.categories));
+  const valid = usable.map((plan) => ({ ...plan, categories: plan.categories.filter(isCategory) }));
+  const droppedCategories = usable.reduce((sum, plan, i) => sum + plan.categories.length - valid[i].categories.length, 0);
+  return { valid, dropped: list.length - usable.length + droppedCategories };
+}
+
+// Rebuilds a document from a damaged copy: invalid records are dropped and empty
+// reference data falls back to the presets. Unparsable JSON cannot be salvaged.
+export function salvageDoc(raw) {
+  const parsed = parseJson(raw);
+  const doc = parsed.ok ? parsed.value : null;
+  if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
+    return fail('Копия повреждена так, что восстановить её автоматически нельзя.');
   }
+  if (doc.schemaVersion > SCHEMA_VERSION) return fail('Данные из более новой версии приложения. Обновите приложение.');
+  const banks = salvageRecords(doc.banks, ENTITY_RULES.banks, BANK_FIELD_DEFAULTS);
+  const mccGroups = salvageRecords(doc.mccGroups, ENTITY_RULES.mccGroups);
+  const stores = salvageRecords(doc.stores, ENTITY_RULES.stores, STORE_FIELD_DEFAULTS);
+  const plans = salvagePlans(doc.plans);
+  const purchases = salvageRecords(doc.purchases, ENTITY_RULES.purchases);
+  const defaults = createDefaultState();
+  const orPreset = (part, preset) => (part.valid.length ? part.valid : preset);
+  const state = {
+    schemaVersion: SCHEMA_VERSION,
+    banks: orPreset(banks, defaults.banks),
+    mccGroups: orPreset(mccGroups, defaults.mccGroups),
+    stores: orPreset(stores, defaults.stores),
+    plans: plans.valid,
+    purchases: purchases.valid,
+    settings: doc.settings && typeof doc.settings === 'object' ? doc.settings : {},
+  };
+  const dropped = [banks, mccGroups, stores, plans, purchases].reduce((sum, part) => sum + part.dropped, 0);
+  return { ok: true, state, dropped };
 }
 
 // --- Entity reducers ------------------------------------------------------

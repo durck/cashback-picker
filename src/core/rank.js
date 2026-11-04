@@ -2,7 +2,7 @@
 //   pct    = best non-exhausted matching category, else basePercent
 //   reward = min(amount × pct / 100, category balance, bank balance)
 //   value  = reward × valueCoef (ruble equivalent); without amount pct × valueCoef
-import { codesOverlap } from './match.js';
+import { codesCover, codesOverlap } from './match.js';
 import { categoriesFor } from './months.js';
 import { remaining, roundMoney } from './limits.js';
 
@@ -34,6 +34,8 @@ function rankBank(state, bank, { codes, amount, month }) {
   const result = {
     bank, pct, basePct: bank.basePercent, category, exhaustedCategory,
     exhausted: bankExhausted ? 'bank' : exhaustedCategory ? 'category' : null,
+    // A group search may hit a category that covers only some of the group's codes.
+    partial: !bankExhausted && category !== null && !codesCover(category.codes, codes),
     remainingCategory, remainingBank, effectivePct,
     rewardRaw: null, reward: null, value: effectivePct,
   };

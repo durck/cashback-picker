@@ -47,6 +47,15 @@ test('backup saves, loads and clears the previous document', () => {
   assert.equal(storage.getItem(BACKUP_KEY), null);
 });
 
+test('listeners already see the backup gone when a restore notifies them', () => {
+  const store = createStore(fixtureV1(), new MemoryStorage());
+  store.replace(createDefaultState());
+  const seen = [];
+  store.subscribe(() => seen.push(store.hasBackup()));
+  store.restoreBackup();
+  assert.deepEqual(seen, [false]);
+});
+
 test('store.replace keeps a backup that restoreBackup brings back', () => {
   const storage = new MemoryStorage();
   const original = fixtureV1();

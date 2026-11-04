@@ -28,6 +28,22 @@ export function includesMcc(codes, mcc) {
   return codesOverlap(codes, [mcc]);
 }
 
+function mergedRanges(codes) {
+  const merged = [];
+  for (const [from, to] of toRanges(codes).sort((a, b) => a[0] - b[0])) {
+    const last = merged.at(-1);
+    if (last && from <= last[1] + 1) last[1] = Math.max(last[1], to);
+    else merged.push([from, to]);
+  }
+  return merged;
+}
+
+// True when every code in `required` falls inside `container`.
+export function codesCover(container, required) {
+  const merged = mergedRanges(container);
+  return toRanges(required).every(([from, to]) => merged.some(([f, t]) => f <= from && to <= t));
+}
+
 function parseToken(token) {
   const range = token.match(/^(\d{1,4})-(\d{1,4})$/);
   if (range) {
